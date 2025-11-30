@@ -6,10 +6,8 @@ Se comprueba la coherencia de df/dx y dg/dy con las ecuaciones
 analíticas, sin introducir ingeniería nueva.
 """
 
-import math
-
-from vscsim.model.dae import f_rhs, g_residual
-from vscsim.model.jacobian import df_dx, dg_dx, dg_dy
+# eliminar: import math
+from vscsim.model.jacobian import df_dx, dg_dy
 
 
 def test_df_dx_matches_analytical():

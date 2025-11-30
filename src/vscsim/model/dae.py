@@ -59,7 +59,7 @@ def f_rhs(
     # Estados dinámicos
     id_ = x["id"]
     iq_ = x["iq"]
-    Vdc = x["Vdc"]
+  
 
     # Algebraicas
     Idc = y["Idc"]

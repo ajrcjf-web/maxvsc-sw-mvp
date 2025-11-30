@@ -16,7 +16,8 @@ Implementación conforme a ENG-1.0.
 
 from typing import Mapping
 
-from .variables import STATE_KEYS, ALGEBRAIC_KEYS
+# quitar:
+# from .variables import STATE_KEYS, ALGEBRAIC_KEYS
 
 
 def df_dx(

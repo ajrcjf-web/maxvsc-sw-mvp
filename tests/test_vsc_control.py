@@ -3,7 +3,7 @@
 Pruebas de los módulos de control y saturación del VSC.
 """
 
-import math
+# import math
 
 from vscsim.vsc.control_external import compute_current_references
 from vscsim.vsc.control_inner import compute_converter_voltage_references
