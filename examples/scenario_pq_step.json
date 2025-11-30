@@ -1,0 +1,30 @@
+{
+  "control_mode": "PQ",
+
+  "v_pcc_d": 1.0,
+  "v_pcc_q": 0.0,
+
+  "P_ref": 0.0,
+  "Q_ref": 0.0,
+
+  "inputs": {
+    "P_ref": 0.0,
+    "Q_ref": 0.0
+  },
+
+  "step_events": [
+    {
+      "time": 0.1,
+      "P_ref": 1.0,
+      "Q_ref": 0.0
+    }
+  ],
+
+  "initial_conditions": {
+    "x0": {
+      "id": 0.0,
+      "iq": 0.0,
+      "Vdc": 1.0
+    }
+  }
+}

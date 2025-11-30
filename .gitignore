@@ -1,0 +1,29 @@
+# Entornos virtuales
+.venv/
+venv/
+
+# Archivos de build / distribución
+dist/
+build/
+maxvsc_sw.egg-info/
+
+# Caches de Python / pytest
+__pycache__/
+.pytest_cache/
+
+# Archivos de configuración de IDEs
+.vscode/
+.idea/
+
+# Ficheros temporales
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+
+# Carpeta temporal genérica (si no la usas para otra cosa)
+v/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/

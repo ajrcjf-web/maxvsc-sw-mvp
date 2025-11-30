@@ -1,0 +1,23 @@
+# ENGINEERING_BASELINE
+
+Baseline de Ingeniería: **ENG-1.0**
+
+## 1. Documentos que conforman el baseline
+- **Especificación Técnica Unificada v1.3**  
+  Ubicación: `maxvsc-engineering/specs/spec_simulator_unified_v1.3.md`
+
+- **Documento Maestro v3.0**  
+  Ubicación: `maxvsc-engineering/processes/MaxVSC_SW_MVP_Documento_Maestro_v3.0.md`
+
+- **Índice de Ingeniería (engineering_index/index.md)**  
+  Ubicación: `maxvsc-engineering/engineering_index/index.md`
+
+## 2. Estado del baseline
+- Baseline aprobado por LSA.  
+- Corresponde completamente a la versión técnica **v1.3** de la Especificación Unificada.
+
+## 3. Notas
+- Este archivo no contiene contenido técnico.  
+- Solo registra el baseline activo y sus documentos asociados.  
+- SPI-E lo actualiza únicamente bajo instrucción directa.
+
