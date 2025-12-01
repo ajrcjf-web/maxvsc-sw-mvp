@@ -98,8 +98,8 @@ def run_simulation(
     scenario = load_scenario(scenario_config)
     ic = load_initial_conditions(scenario_config.get("initial_conditions", {}))
 
-    x = dict(ic["x0"])
-    y = dict(ic["y0"])
+    x: dict[str, float] = dict(ic["x0"])
+    y: dict[str, float] = dict(ic["y0"])
 
     # Asegurar que y contiene todas las algebraicas requeridas,
     # incluso si el escenario no proporcionó valores explícitos.
@@ -111,12 +111,12 @@ def run_simulation(
     # 2) Preparar estructuras de salida
     # ------------------------------------------------------------------
     times: list[float] = []
-    x_hist = {
+    x_hist: dict[str, list[float]] = {
         "id": [],
         "iq": [],
         "Vdc": [],
     }
-    y_hist = {
+    y_hist: dict[str, list[float]] = {
         "Idc": [],
         "P_ac": [],
         "Q_ac": [],
