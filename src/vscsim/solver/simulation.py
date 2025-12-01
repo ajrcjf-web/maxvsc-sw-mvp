@@ -101,13 +101,16 @@ def run_step(
     # ------------------------------------------------------------------
     # 1) Control externo
     # ------------------------------------------------------------------
-    id_ref, iq_ref = compute_current_references(
+    refs = compute_current_references(
         t=t,
         x=x,
         y=y,
         scenario=scenario,
         params=params,
     )
+    # compute_current_references devuelve un dict; extraemos las referencias
+    id_ref = float(refs.get("id_ref", 0.0))
+    iq_ref = float(refs.get("iq_ref", 0.0))
 
     # ------------------------------------------------------------------
     # 2) Control interno proporcional (estructura compatible con PI)
