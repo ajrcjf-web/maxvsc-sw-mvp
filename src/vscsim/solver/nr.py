@@ -19,23 +19,25 @@ from typing import Mapping, Callable, Tuple
 from vscsim.model.variables import ALGEBRAIC_KEYS
 
 
-# Firma conceptual de las funciones de residual y Jacobiano
+# Firma conceptual de las funciones de residual y Jacobiano.
+# En ENG-1.0 se asume que params e inputs son siempre diccionarios válidos
+# (se usan {} si no se proporcionan explícitamente).
 ResidualFunc = Callable[
     [
         Mapping[str, float],  # x
         Mapping[str, float],  # y
-        Mapping[str, float] | None,  # params
-        Mapping[str, float] | None,  # inputs
+        Mapping[str, float],  # params
+        Mapping[str, float],  # inputs
     ],
-    dict,
+    dict[str, float],
 ]
 
 JacobianFunc = Callable[
     [
         Mapping[str, float],  # x
         Mapping[str, float],  # y
-        Mapping[str, float] | None,  # params
-        Mapping[str, float] | None,  # inputs
+        Mapping[str, float],  # params
+        Mapping[str, float],  # inputs
     ],
     list[list[float]],
 ]
@@ -107,7 +109,7 @@ def newton_raphson(
     jacobian: JacobianFunc,
     params: Mapping[str, float] | None = None,
     inputs: Mapping[str, float] | None = None,
-) -> Tuple[dict, int]:
+) -> Tuple[dict[str, float], int]:
     """
     Ejecuta el lazo NR para resolver g(x, y) = 0 con x fijo.
 
@@ -130,11 +132,12 @@ def newton_raphson(
 
     params :
         Parámetros del sistema. Se pasan directamente a residual y
-        jacobian. Pueden ser None si no se requieren.
+        jacobian. Pueden ser None; en ese caso se usa {}.
 
     inputs :
         Entradas algebraicas (por ejemplo tensiones), constantes durante
-        NR. Se pasan directamente a residual y jacobian. Pueden ser None.
+        NR. Se pasan directamente a residual y jacobian. Pueden ser None;
+        en ese caso se usa {}.
 
     Retorno
     -------
@@ -153,9 +156,9 @@ def newton_raphson(
     - No se altera el modelo eléctrico ni la formulación de la ETU v1.3.
     """
     # Copias locales para no modificar referencias de entrada
-    y = dict(y0)
-    params_local = params or {}
-    inputs_local = inputs or {}
+    y: dict[str, float] = dict(y0)
+    params_local: Mapping[str, float] = params or {}
+    inputs_local: Mapping[str, float] = inputs or {}
 
     max_iter = _DEFAULT_MAX_ITER
     tol = _DEFAULT_TOL
