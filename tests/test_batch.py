@@ -8,8 +8,6 @@ No se ejecuta ingeniería real:
 
 from __future__ import annotations
 
-import pytest
-
 from vscsim.api.batch import (
     BatchCase,
     BatchResult,
