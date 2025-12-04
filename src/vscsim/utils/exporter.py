@@ -1,268 +1,196 @@
-"""
-vscsim.utils.exporter
-
-Utilidades de exportación de resultados de simulación a formatos estándar.
-
-Este módulo es puramente de I/O:
-- No depende de la ingeniería del modelo.
-- No modifica el solver ni la secuencia de simulación.
-
-Formatos soportados:
-- CSV (siempre, usando la librería estándar de Python)
-- Parquet (si hay pandas disponible en el entorno)
-
-Además incluye helpers para exportar directamente resultados de simulación
-(t, x_history, y_history) producidos por la API de simulación.
-"""
-
+# src/vscsim/utils/exporter.py
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any, Optional
 import csv
-import os
-from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+import json
 
-try:
-    import pandas as _pd  # type: ignore[import]
-except Exception:
+from .config import ExportConfig
+
+try:  # pragma: no cover - entorno sin pandas
+    import pandas as _pd
+except ImportError:  # pragma: no cover
     _pd = None
 
 
-@dataclass
-class ExportConfig:
-    """
-    Configuración básica para exportación.
-
-    Parameters
-    ----------
-    overwrite : bool
-        Si False y el archivo ya existe, se lanza un error.
-    """
-
-    overwrite: bool = False
+# ---------------------------------------------------------------------------
+# Utilidades internas
+# ---------------------------------------------------------------------------
 
 
-def _ensure_can_write(path: str, cfg: ExportConfig) -> None:
-    """
-    Verifica si el archivo de salida se puede escribir según la configuración.
-    """
-    if os.path.exists(path) and not cfg.overwrite:
-        raise FileExistsError(
-            f"Output file already exists and overwrite=False: {path!r}"
-        )
-
-
-def _normalize_rows(data: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Normaliza una colección de filas en una lista de dicts.
-
-    Cada elemento de `data` debe ser un Mapping (por ejemplo dict) que
-    representa una fila. Las claves se usan como nombres de columna.
-    """
-    rows: list[dict[str, Any]] = []
-    for row in data:
-        rows.append(dict(row))
-    return rows
-
-
-# ---------------------------------------------------------------------
-# Exportación CSV
-# ---------------------------------------------------------------------
-
-
-def export_csv(
-    data: Iterable[Mapping[str, Any]],
-    path: str,
-    config: ExportConfig | None = None,
-) -> None:
-    """
-    Exporta una colección de filas a CSV.
-
-    Parameters
-    ----------
-    data :
-        Iterable de mappings (por ejemplo, list[dict[str, Any]]), una fila por elemento.
-    path :
-        Ruta del archivo de salida CSV.
-    config :
-        Configuración de export (sobrescritura, etc.).
-
-    Notes
-    -----
-    - Si `config.overwrite` es False y el archivo ya existe, se lanza FileExistsError.
-    - El orden de las columnas se deduce de la primera fila.
-    """
-    cfg = config or ExportConfig()
-    _ensure_can_write(path, cfg)
-
-    rows = _normalize_rows(data)
-    if not rows:
-        # Crear CSV vacío sin cabecera
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            pass
-        return
-
-    fieldnames = list(rows[0].keys())
-
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-
-
-# ---------------------------------------------------------------------
-# Exportación Parquet
-# ---------------------------------------------------------------------
-
-
-def _ensure_pandas_for_parquet() -> None:
-    """
-    Verifica que pandas está disponible para exportar Parquet.
-
-    La decisión de depender de pyarrow/fastparquet queda delegada a pandas
-    y a la configuración del entorno.
-    """
-    if _pd is None:
-        raise RuntimeError(
-            "Parquet export requires pandas to be installed. "
-            "Please install pandas (and a Parquet engine such as pyarrow)."
-        )
-
-
-def export_parquet(
-    data: Iterable[Mapping[str, Any]],
-    path: str,
-    config: ExportConfig | None = None,
-    *,
-    engine: str | None = None,
-) -> None:
-    """
-    Exporta una colección de filas a Parquet usando pandas, si está disponible.
-
-    Parameters
-    ----------
-    data :
-        Iterable de mappings (por ejemplo, list[dict[str, Any]]), una fila por elemento.
-    path :
-        Ruta del archivo de salida Parquet.
-    config :
-        Configuración de export (sobrescritura, etc.).
-    engine :
-        Motor Parquet a usar (por ejemplo "pyarrow" o "fastparquet").
-        Si es None, pandas elegirá el motor por defecto.
-
-    Notes
-    -----
-    - Si pandas no está disponible, se lanza RuntimeError.
-    - Si `config.overwrite` es False y el archivo ya existe, se lanza FileExistsError.
-    """
-    _ensure_pandas_for_parquet()
-
-    cfg = config or ExportConfig()
-    _ensure_can_write(path, cfg)
-
-    rows = _normalize_rows(data)
-    df = _pd.DataFrame(rows)  # type: ignore[attr-defined]
-
-    df.to_parquet(path, engine=engine)
-
-
-# ---------------------------------------------------------------------
-# Helpers de integración con la API de simulación
-# ---------------------------------------------------------------------
+def _ensure_parent_dir(path: str | Path) -> Path:
+    """Asegura que existe la carpeta padre y devuelve el Path normalizado."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def build_timeseries_rows(
     times: Sequence[float],
     x_history: Sequence[Mapping[str, float]],
-    y_history: Sequence[Mapping[str, float]] | None = None,
+    y_history: Optional[Sequence[Mapping[str, float]]] = None,
 ) -> list[dict[str, Any]]:
     """
-    Construye filas "planas" a partir de los resultados de simulación.
+    Combina time / x_hist / y_hist en una lista de dicts por instante de tiempo.
 
-    Parameters
-    ----------
-    times :
-        Secuencia de instantes t[k].
-    x_history :
-        Secuencia de estados dinámicos x[k] (dicts).
-    y_history :
-        Secuencia de variables algebraicas y[k] (dicts) o None.
-
-    Returns
-    -------
-    list[dict[str, Any]]
-        Lista de filas, cada una con la forma:
-
-            {
-                "t": ...,
-                "<x_key>": ...,
-                "<y_key>": ... (si y_history no es None)
-            }
-
-    Notas
-    -----
-    - Se asume que len(times) == len(x_history) y, si y_history no es None,
-      también len(y_history) == len(times).
+    Cada fila es:
+        {"t": t_i, **x_history[i], **y_history[i]}
     """
-    n = len(times)
-    if len(x_history) != n:
+    if y_history is None:
+        y_history = []
+
+    if len(times) != len(x_history):
         raise ValueError("len(times) y len(x_history) deben coincidir")
-    if y_history is not None and len(y_history) != n:
+
+    if y_history and len(times) != len(y_history):
         raise ValueError("len(times) y len(y_history) deben coincidir")
 
     rows: list[dict[str, Any]] = []
-    for idx in range(n):
-        t = times[idx]
-        x = x_history[idx]
+    for i, t in enumerate(times):
         row: dict[str, Any] = {"t": float(t)}
-
-        # Estados dinámicos: se aplanan con sus claves originales (id, iq, Vdc, ...)
-        for k, v in x.items():
-            row[str(k)] = float(v)
-
-        if y_history is not None:
-            y = y_history[idx]
-            for k, v in y.items():
-                # Si hay colisión de nombres, la clave de y sobrescribirá la de x.
-                # Esto es aceptable mientras las claves del modelo sean disjuntas.
-                row[str(k)] = float(v)
-
+        row.update(x_history[i])
+        if y_history:
+            row.update(y_history[i])
         rows.append(row)
 
     return rows
 
 
-def export_simulation_csv(
-    times: Sequence[float],
-    x_history: Sequence[Mapping[str, float]],
-    y_history: Sequence[Mapping[str, float]] | None,
-    path: str,
-    config: ExportConfig | None = None,
+# ---------------------------------------------------------------------------
+# Exportaciones básicas: CSV / JSON / Parquet
+# ---------------------------------------------------------------------------
+
+
+def export_csv(
+    rows: Sequence[Mapping[str, Any]],
+    path: str | Path,
+    config: Optional[ExportConfig] = None,
+) -> None:
+    """Escribe una lista de filas (dicts) a CSV plano."""
+    cfg = config or ExportConfig()
+    p = _ensure_parent_dir(path)
+
+    if not cfg.overwrite and p.exists():
+        raise FileExistsError(p)
+
+    # Campos = unión de todas las claves en orden estable
+    fieldnames: list[str]
+    if rows:
+        keys: list[str] = []
+        for r in rows:
+            for k in r.keys():
+                if k not in keys:
+                    keys.append(k)
+        fieldnames = keys
+    else:
+        fieldnames = []
+
+
+    with p.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+
+
+def export_json(
+    rows: Sequence[Mapping[str, Any]],
+    path: str | Path,
+    config: Optional[ExportConfig] = None,
+) -> None:
+    """Escribe las filas como lista JSON."""
+    cfg = config or ExportConfig()
+    p = _ensure_parent_dir(path)
+
+    if not cfg.overwrite and p.exists():
+        raise FileExistsError(p)
+
+    with p.open("w", encoding="utf-8") as f:
+        json.dump(list(rows), f, indent=2)
+
+
+def export_parquet(
+    rows: Sequence[Mapping[str, Any]],
+    path: str | Path,
+    config: Optional[ExportConfig] = None,
+    engine: Optional[str] = None,
 ) -> None:
     """
-    Exporta resultados de simulación (times, x_history, y_history) a CSV.
+    Escribe Parquet usando pandas.
 
-    Esta función actúa como integración de alto nivel para la API de simulación.
+    - Si pandas no está disponible -> RuntimeError.
+    - Si engine es None -> se deja que pandas use el modo 'auto'.
+    - Si engine es "pyarrow" o "fastparquet", se pasa explícitamente.
     """
-    rows = build_timeseries_rows(times, x_history, y_history)
+    if _pd is None:
+        raise RuntimeError(
+            "Parquet export requires pandas to be installed. "
+            "Please install pandas (and a Parquet engine such as pyarrow).",
+        )
+
+    cfg = config or ExportConfig()
+    p = _ensure_parent_dir(path)
+
+    if not cfg.overwrite and p.exists():
+        raise FileExistsError(p)
+
+    df = _pd.DataFrame(list(rows))
+
+    kwargs: dict[str, Any] = {}
+    if engine is not None:
+        kwargs["engine"] = engine
+
+    df.to_parquet(p, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# API de alto nivel usada por CLI / casos avanzados
+# ---------------------------------------------------------------------------
+
+
+def export_simulation_csv(
+    time: Sequence[float],
+    x_history: Sequence[Mapping[str, float]],
+    y_history: Optional[Sequence[Mapping[str, float]]],
+    path: str,
+    config: Optional[ExportConfig] = None,
+) -> None:
+    """
+    Helper oficial para exportar una simulación completa a CSV.
+
+    time: lista de tiempos
+    x_history: lista de snapshots de estados (dicts)
+    y_history: lista opcional de snapshots de algebraicas (dicts)
+    """
+    rows = build_timeseries_rows(time, x_history, y_history)
     export_csv(rows, path, config=config)
 
 
 def export_simulation_parquet(
-    times: Sequence[float],
+    time: Sequence[float],
     x_history: Sequence[Mapping[str, float]],
-    y_history: Sequence[Mapping[str, float]] | None,
+    y_history: Optional[Sequence[Mapping[str, float]]],
     path: str,
-    config: ExportConfig | None = None,
-    *,
-    engine: str | None = None,
+    config: Optional[ExportConfig] = None,
+    engine: Optional[str] = None,
 ) -> None:
     """
-    Exporta resultados de simulación (times, x_history, y_history) a Parquet.
+    Helper oficial para exportar una simulación completa a Parquet.
 
-    Esta función actúa como integración de alto nivel para la API de simulación.
+    Se apoya en export_parquet y acepta engine=None / "pyarrow".
     """
-    rows = build_timeseries_rows(times, x_history, y_history)
+    rows = build_timeseries_rows(time, x_history, y_history)
     export_parquet(rows, path, config=config, engine=engine)
+
+
+__all__ = [
+    "ExportConfig",
+    "build_timeseries_rows",
+    "export_csv",
+    "export_json",
+    "export_parquet",
+    "export_simulation_csv",
+    "export_simulation_parquet",
+]
