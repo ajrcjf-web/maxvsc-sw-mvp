@@ -1,7 +1,20 @@
--r dashboard/requirements.txt
-fastapi
-uvicorn
-pandas
-pyarrow
-numpy
-httpx
+# Core scientific stack
+numpy>=1.26
+pandas>=2.0
+pyarrow>=14.0
+
+# FastAPI dashboard
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27   # necesario para TestClient
+
+# CLI
+click>=8.1
+
+# Testing
+pytest>=7.4
+anyio>=4.0
+
+# Optional: performance / stability
+# Si deseas mejor rendimiento en Parquet, fastparquet también es válido:
+# fastparquet>=2024.1.0
