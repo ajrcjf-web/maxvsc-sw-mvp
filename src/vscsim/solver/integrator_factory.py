@@ -14,7 +14,7 @@ from typing import Literal, Mapping, Any
 
 from .integrator_rk import BaseIntegrator, RK1Integrator, RK2Integrator, RK4Integrator
 
-IntegratorName = Literal["rk1", "rk2", "rk4", "euler"]
+IntegratorName = Literal["euler", "rk1", "rk2", "rk4"]
 
 
 def get_integrator(
@@ -26,7 +26,7 @@ def get_integrator(
 
     Parameters
     ----------
-    name : {"rk1", "rk2", "rk4", "euler"}
+    name : {"euler", "rk1", "rk2", "rk4"}
         Nombre del integrador a utilizar. El alias "euler" apunta a RK1.
     config : Mapping[str, Any], optional
         Configuración adicional específica del integrador (reservado para uso futuro).
@@ -35,18 +35,12 @@ def get_integrator(
     -------
     BaseIntegrator
         Instancia del integrador seleccionado.
-
-    Notes
-    -----
-    La integración con simulation.py y step_forward se hará en A1.1.4/A1.1.5.
     """
-    # Por ahora solo es un esqueleto; no se aplica ninguna lógica adicional.
-    if name in ("rk1", "euler"):
+    if name in ("euler", "rk1"):
         return RK1Integrator()
     if name == "rk2":
         return RK2Integrator()
     if name == "rk4":
         return RK4Integrator()
 
-    # En versiones futuras se podría añadir validación más estricta o errores específicos.
     raise ValueError(f"Integrador no soportado: {name!r}")

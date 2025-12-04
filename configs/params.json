@@ -1,0 +1,11 @@
+{
+  "nr_tol": 1e-8,
+  "nr_max_iter": 20,
+  "nr_norm": "max",
+  "nr_verbose": false,
+
+  "control_mode": "PQ",
+  "P_ref": 0.5,
+  "Q_ref": 0.0
+}
+

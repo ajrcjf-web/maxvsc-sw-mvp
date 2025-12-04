@@ -1,105 +1,140 @@
 """
-Implementación del solver Newton–Raphson para las variables algebraicas y.
+vscsim.solver.nr
 
-Resuelve:
-    g(x_k, y) = 0 → y_{k+1}
+Implementación del método de Newton–Raphson sobre las ecuaciones
+algebraicas g(x, y) = 0, utilizando únicamente la Jacobiana dg/dy.
 
-Reglas (ETU v1.3, ENG-1.0):
-- x se mantiene fijo durante NR.
-- No se deriva la saturación.
-- v_conv_d y v_conv_q se consideran constantes dentro del NR.
-- Se utiliza exclusivamente g(x, y) y el Jacobiano respecto a y, dg/dy.
-
-Este módulo implementa únicamente el algoritmo NR; no modifica el modelo
-eléctrico ni la formulación DAE.
+Este módulo forma parte del framework numérico y no modifica la
+ingeniería del modelo RMS ni la definición de g(x, y) en la ETU v1.3.
 """
 
-from typing import Mapping, Callable, Tuple
+from __future__ import annotations
 
-from vscsim.model.variables import ALGEBRAIC_KEYS
-
-
-# Firma conceptual de las funciones de residual y Jacobiano.
-# En ENG-1.0 se asume que params e inputs son siempre diccionarios válidos
-# (se usan {} si no se proporcionan explícitamente).
-ResidualFunc = Callable[
-    [
-        Mapping[str, float],  # x
-        Mapping[str, float],  # y
-        Mapping[str, float],  # params
-        Mapping[str, float],  # inputs
-    ],
-    dict[str, float],
-]
-
-JacobianFunc = Callable[
-    [
-        Mapping[str, float],  # x
-        Mapping[str, float],  # y
-        Mapping[str, float],  # params
-        Mapping[str, float],  # inputs
-    ],
-    list[list[float]],
-]
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping, Tuple, Protocol, List
 
 
-# Parámetros numéricos mínimos (no forman parte de la ingeniería, solo NR básico)
-_DEFAULT_MAX_ITER = 20
-_DEFAULT_TOL = 1e-8
-
-
-def _max_norm(vec: list[float]) -> float:
-    """Norma infinito (máximo valor absoluto) de un vector."""
-    return max((abs(v) for v in vec), default=0.0)
-
-
-def _solve_linear_system(
-    A: list[list[float]],
-    b: list[float],
-) -> list[float]:
+class ResidualFunc(Protocol):
     """
-    Resuelve el sistema lineal A * x = b mediante eliminación gaussiana
-    con pivotado parcial sencillo.
+    Firma de la función de residuo g(x, y).
 
-    Esta función es genérica y no modifica el modelo ni la formulación
-    matemática; solo implementa el paso algebraico requerido por NR.
+    Parameters
+    ----------
+    x :
+        Estados dinámicos actuales.
+    y :
+        Variables algebraicas actuales.
+    params :
+        Parámetros eléctricos / de control.
+    inputs :
+        Entradas algebraicas (por ejemplo tensiones, consignas, etc.).
+
+    Returns
+    -------
+    Mapping[str, float]
+        Residuo g(x, y) indexado por las mismas claves que y.
     """
-    n = len(b)
 
-    # Copias locales para no modificar los argumentos de entrada
-    M = [row[:] for row in A]
-    rhs = b[:]
+    def __call__(
+        self,
+        x: Mapping[str, float],
+        y: Mapping[str, float],
+        params: Mapping[str, float] | None,
+        inputs: Mapping[str, float] | None,
+    ) -> Mapping[str, float]:
+        ...
+
+
+class JacobianFunc(Protocol):
+    """
+    Firma de la función de Jacobiana dg/dy.
+
+    Devuelve una matriz en forma de lista de listas, consistente con
+    el orden de las claves de y.
+    """
+
+    def __call__(
+        self,
+        x: Mapping[str, float],
+        y: Mapping[str, float],
+        params: Mapping[str, float] | None,
+        inputs: Mapping[str, float] | None,
+    ) -> List[List[float]]:
+        ...
+
+
+@dataclass
+class NRConfig:
+    """
+    Configuración opcional del solver de Newton–Raphson.
+
+    Estos parámetros forman parte del framework numérico (Track A1.3)
+    y no alteran la formulación de g(x, y) ni la ingeniería de ENG-1.0.
+    """
+
+    tol: float = 1e-8
+    max_iter: int = 20
+    norm: str = "max"  # "max" o "l2"
+    verbose: bool = False
+
+
+def _vector_norm(values: Mapping[str, float], kind: str = "max") -> float:
+    """Norma de un vector representado como dict."""
+    if not values:
+        return 0.0
+
+    if kind == "l2":
+        s = 0.0
+        for v in values.values():
+            s += float(v) * float(v)
+        return s ** 0.5
+
+    # Norma infinito ("max")
+    m = 0.0
+    for v in values.values():
+        av = abs(float(v))
+        if av > m:
+            m = av
+    return m
+
+
+def _solve_linear_system(jac: List[List[float]], res: List[float]) -> List[float]:
+    """
+    Resuelve J * delta = -res mediante eliminación gaussiana simple.
+
+    No depende de librerías externas y está pensado para sistemas
+    pequeños (como el g(x, y) del MVP: Idc, P_ac, Q_ac).
+    """
+    n = len(res)
+    # Matriz aumentada [J | -res]
+    aug = [list(row) + [-res[i]] for i, row in enumerate(jac)]
 
     # Eliminación hacia adelante
     for k in range(n):
-        # Búsqueda de pivote
-        pivot_row = max(range(k, n), key=lambda i: abs(M[i][k]))
-        pivot_val = M[pivot_row][k]
+        pivot = aug[k][k]
+        if pivot == 0.0:
+            raise ZeroDivisionError("Pivot cero en eliminación gaussiana (Jacobiana singular).")
 
-        if abs(pivot_val) == 0.0:
-            raise ValueError("Jacobian is singular in Newton–Raphson step.")
+        inv_pivot = 1.0 / pivot
+        for j in range(k, n + 1):
+            aug[k][j] *= inv_pivot
 
-        # Intercambio de filas si es necesario
-        if pivot_row != k:
-            M[k], M[pivot_row] = M[pivot_row], M[k]
-            rhs[k], rhs[pivot_row] = rhs[pivot_row], rhs[k]
-
-        # Eliminación
         for i in range(k + 1, n):
-            factor = M[i][k] / M[k][k]
-            rhs[i] -= factor * rhs[k]
-            for j in range(k, n):
-                M[i][j] -= factor * M[k][j]
+            factor = aug[i][k]
+            if factor == 0.0:
+                continue
+            for j in range(k, n + 1):
+                aug[i][j] -= factor * aug[k][j]
 
     # Sustitución hacia atrás
-    x = [0.0] * n
-    for i in reversed(range(n)):
-        s = rhs[i]
+    delta = [0.0] * n
+    for i in range(n - 1, -1, -1):
+        s = 0.0
         for j in range(i + 1, n):
-            s -= M[i][j] * x[j]
-        x[i] = s / M[i][i]
+            s += aug[i][j] * delta[j]
+        delta[i] = aug[i][n] - s
 
-    return x
+    return delta
 
 
 def newton_raphson(
@@ -109,98 +144,78 @@ def newton_raphson(
     jacobian: JacobianFunc,
     params: Mapping[str, float] | None = None,
     inputs: Mapping[str, float] | None = None,
+    *,
+    tol: float | None = None,
+    max_iter: int | None = None,
+    norm: str | None = None,
+    logger: Callable[[dict[str, Any]], None] | None = None,
 ) -> Tuple[dict[str, float], int]:
     """
-    Ejecuta el lazo NR para resolver g(x, y) = 0 con x fijo.
+    Resuelve g(x, y) = 0 respecto a y usando Newton–Raphson clásico.
 
-    Parámetros
-    ----------
-    x :
-        Estados dinámicos x_k en el instante actual (id, iq, Vdc).
-        Se consideran constantes durante toda la iteración NR.
+    Devuelve:
+        y      : solución encontrada (o último valor si no converge),
+        n_iter : número de iteraciones realizadas.
 
-    y0 :
-        Valor inicial de las variables algebraicas y (Idc, P_ac, Q_ac).
-
-    residual :
-        Función que implementa g(x, y), devolviendo un dict con las
-        mismas claves que y (por ejemplo: "Idc", "P_ac", "Q_ac").
-
-    jacobian :
-        Función que implementa dg/dy, devolviendo una matriz cuadrada
-        (lista de listas) en el orden de ALGEBRAIC_KEYS.
-
-    params :
-        Parámetros del sistema. Se pasan directamente a residual y
-        jacobian. Pueden ser None; en ese caso se usa {}.
-
-    inputs :
-        Entradas algebraicas (por ejemplo tensiones), constantes durante
-        NR. Se pasan directamente a residual y jacobian. Pueden ser None;
-        en ese caso se usa {}.
-
-    Retorno
-    -------
-    y_nr : dict
-        Solución de las variables algebraicas tras NR.
-
-    n_iter : int
-        Número de iteraciones realizadas.
-
-    Notas
-    -----
-    - El orden de las variables algebraicas se fija por ALGEBRAIC_KEYS,
-      que debe ser coherente con g(x, y) y dg/dy.
-    - La implementación respeta la estructura g(x, y) = 0 y utiliza
-      exclusivamente información de f/g y sus Jacobianos.
-    - No se altera el modelo eléctrico ni la formulación de la ETU v1.3.
+    Se mantiene compatibilidad con la API original (segundo return = int),
+    añadiendo solo configuración opcional vía params/kwargs y logging.
     """
-    # Copias locales para no modificar referencias de entrada
-    y: dict[str, float] = dict(y0)
-    params_local: Mapping[str, float] = params or {}
-    inputs_local: Mapping[str, float] = inputs or {}
+    # ----------------------------
+    # Lectura de configuración NR
+    # ----------------------------
+    cfg = NRConfig()
+    if params is not None:
+        if "nr_tol" in params:
+            cfg.tol = float(params["nr_tol"])
+        if "nr_max_iter" in params:
+            cfg.max_iter = int(params["nr_max_iter"])
+        if "nr_norm" in params:
+            cfg.norm = str(params["nr_norm"])
+        if "nr_verbose" in params:
+            cfg.verbose = bool(params["nr_verbose"])
 
-    max_iter = _DEFAULT_MAX_ITER
-    tol = _DEFAULT_TOL
+    if tol is not None:
+        cfg.tol = float(tol)
+    if max_iter is not None:
+        cfg.max_iter = int(max_iter)
+    if norm is not None:
+        cfg.norm = str(norm)
 
-    # Orden de variables algebraicas fijado por el baseline
-    keys = list(ALGEBRAIC_KEYS)
+    # ----------------------------
+    # Bucle de Newton–Raphson
+    # ----------------------------
+    y = dict(y0)
+    keys = list(y.keys())
 
     n_iter = 0
 
-    for k in range(max_iter):
-        # Evaluar residual g(x, y)
-        g = residual(x, y, params_local, inputs_local)
+    for it in range(cfg.max_iter):
+        g_val = residual(x, y, params, inputs)
+        res_norm = _vector_norm(g_val, kind=cfg.norm)
 
-        # Comprobación básica de consistencia de claves
-        if set(g.keys()) != set(keys):
-            raise ValueError(
-                "Residual keys do not match ALGEBRAIC_KEYS in Newton–Raphson."
-            )
+        n_iter = it + 1
 
-        r_vec = [g[key] for key in keys]
+        if logger is not None:
+            logger({
+                "iter": it,
+                "res_norm": res_norm,
+                "y": dict(y),
+            })
 
-        # Criterio de convergencia
-        norm_r = _max_norm(r_vec)
-        if norm_r < tol:
-            n_iter = k
-            return y, n_iter
+        if res_norm <= cfg.tol:
+            break
 
-        # Evaluar Jacobiano dg/dy
-        J = jacobian(x, y, params_local, inputs_local)
+        # Jacobiana y actualización
+        j_mat = jacobian(x, y, params, inputs)
+        r_vec = [float(g_val[k]) for k in keys]
 
-        if len(J) != len(keys) or any(len(row) != len(keys) for row in J):
-            raise ValueError("Jacobian size does not match ALGEBRAIC_KEYS in NR.")
+        # J * delta = -g  → delta = -J^{-1} g
+        delta_vec = _solve_linear_system(j_mat, r_vec)
 
-        # Resolver J * Δy = -g
-        rhs = [-val for val in r_vec]
-        delta = _solve_linear_system(J, rhs)
+        for k, key in enumerate(keys):
+            y[key] = float(y[key]) + delta_vec[k]
 
-        # Actualizar y
-        for i, key in enumerate(keys):
-            y[key] = y[key] + delta[i]
+        if cfg.verbose and logger is None:
+            print(f"[NR] iter={it} res_norm={res_norm:.3e}")
 
-        n_iter = k + 1
-
-    # Si se alcanza max_iter sin converger, se devuelve el último y y el nº de iteraciones
     return y, n_iter

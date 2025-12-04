@@ -1,0 +1,14 @@
+{
+  "grid": {
+    "V_ac": 1.0,
+    "theta_ac": 0.0
+  },
+  "initial_conditions": {
+    "id": 0.0,
+    "iq": 0.0,
+    "Vdc": 1.0,
+    "Idc": 0.0,
+    "P_ac": 0.0,
+    "Q_ac": 0.0
+  }
+}

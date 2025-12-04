@@ -1,19 +1,18 @@
 """
-CLI mínima para el simulador RMS VSC-HVDC.
+CLI extendida para el simulador RMS VSC-HVDC (ETU v1.3).
 
-Permite:
-- Cargar parámetros desde un archivo JSON.
-- Cargar escenario desde un archivo JSON.
-- Ejecutar una simulación básica usando la API run_simulation.
-- Imprimir un resumen de resultados.
+Extiende la CLI mínima existente y añade:
 
-Esta CLI no altera el modelo RMS, la DAE, el solver ni el control.
-Solo llama a:
+- Selección de integrador (euler/rk1/rk2/rk4)
+- Parámetros NR configurables
+- Logging global (nivel + JSON)
+- Exportación de resultados (CSV/Parquet)
 
-- api.simulation.run_simulation
-
-Implementación conforme a ENG-1.0.
+NO modifica la ingeniería ni la API existente.
+Solo prepara estructuras y delega en api.simulation.run_simulation().
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -21,8 +20,17 @@ from pathlib import Path
 from typing import Any
 
 from vscsim.api.simulation import run_simulation
+from vscsim.utils.logger import configure_global_logger_from_config
+from vscsim.utils.exporter import (
+    export_simulation_csv,
+    export_simulation_parquet,
+    ExportConfig,
+)
 
 
+# ---------------------------------------------------------------------
+# Utilidades internas
+# ---------------------------------------------------------------------
 def _load_json(path_str: str) -> dict[str, Any]:
     """Carga un archivo JSON y lo devuelve como dict."""
     path = Path(path_str)
@@ -30,92 +38,147 @@ def _load_json(path_str: str) -> dict[str, Any]:
         return json.load(f)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _inject_nr_params(params: dict[str, Any], args: argparse.Namespace) -> None:
     """
-    Punto de entrada CLI.
-
-    Ejemplo de uso:
-
-        python -m vscsim.cli.main \\
-            --params params.json \\
-            --scenario scenario.json \\
-            --t-end 1.0 \\
-            --dt 0.01
-
-    donde:
-    - params.json contiene los parámetros para load_parameters.
-    - scenario.json contiene el escenario para load_scenario y, dentro
-      de él, opcionalmente:
-          "initial_conditions": { ... }
-
-    Este comando no modifica la ingeniería del simulador; solo encadena
-    la carga de datos y la llamada a run_simulation.
+    Inyecta parámetros NR desde CLI al dict params del escenario.
+    NO modifica ingeniería, solo setea claves ya soportadas por NR.
     """
+    if args.nr_tol is not None:
+        params["nr_tol"] = float(args.nr_tol)
+    if args.nr_max_iter is not None:
+        params["nr_max_iter"] = int(args.nr_max_iter)
+    if args.nr_norm is not None:
+        params["nr_norm"] = args.nr_norm
+    if args.nr_verbose:
+        params["nr_verbose"] = True
+
+
+# ---------------------------------------------------------------------
+# Parser CLI
+# ---------------------------------------------------------------------
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Simulador RMS VSC-HVDC (ENG-1.0, ETU v1.3)."
-    )
-    parser.add_argument(
-        "--params",
-        required=True,
-        help="Ruta al archivo JSON con la configuración de parámetros.",
-    )
-    parser.add_argument(
-        "--scenario",
-        required=True,
-        help="Ruta al archivo JSON con la configuración del escenario.",
-    )
-    parser.add_argument(
-        "--t-end",
-        type=float,
-        default=1.0,
-        help="Tiempo final de simulación (segundos).",
-    )
-    parser.add_argument(
-        "--dt",
-        type=float,
-        default=0.01,
-        help="Paso de integración (segundos).",
+        description="Simulador RMS VSC-HVDC – CLI extendida (ETU v1.3)"
     )
 
+    # Archivos de entrada (igual que CLI original)
+    parser.add_argument("--params", required=True, help="Archivo JSON de parámetros.")
+    parser.add_argument("--scenario", required=True, help="Archivo JSON de escenario.")
+
+    # Tiempo / integración
+    parser.add_argument("--t-end", type=float, default=1.0, help="Tiempo final.")
+    parser.add_argument("--dt", type=float, default=1e-3, help="Paso fijo o dt inicial.")
+
+    # ---------------- Integrador (A2.3.1) ----------------
+    parser.add_argument(
+        "--integrator",
+        type=str,
+        choices=["euler", "rk1", "rk2", "rk4"],
+        default="euler",
+        help="Integrador dinámico.",
+    )
+
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Activar dt adaptativo.",
+    )
+
+    # --------------------- NR (A2.3.2) ---------------------
+    parser.add_argument("--nr-tol", type=float, default=None, help="Tolerancia NR.")
+    parser.add_argument("--nr-max-iter", type=int, default=None, help="Máx iter NR.")
+    parser.add_argument("--nr-norm", type=str, choices=["max", "l2"], default=None)
+    parser.add_argument(
+        "--nr-verbose", action="store_true", help="Activar logging interno NR."
+    )
+
+    # ------------------- Logging (A2.3.3) ------------------
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        choices=["error", "warning", "info", "debug"],
+        default="info",
+        help="Nivel de logging global.",
+    )
+    parser.add_argument(
+        "--log-json",
+        action="store_true",
+        help="Emitir logs en formato JSON-lines.",
+    )
+
+    # ------------------- Exportación (A2.3.4) ---------------
+    parser.add_argument(
+        "--export",
+        type=str,
+        choices=["none", "csv", "parquet"],
+        default="none",
+        help="Formato de exportación de resultados.",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Archivo destino si se usa --export.",
+    )
+
+    return parser
+
+
+# ---------------------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------------------
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
-    # Cargar configuración de parámetros y escenario
+    # 1) Cargar parámetros y escenario
     params_config = _load_json(args.params)
     scenario_config = _load_json(args.scenario)
 
-    # Ejecutar la simulación usando la API
+    # 2) Inyectar NR desde CLI (NO ingeniería)
+    _inject_nr_params(params_config, args)
+
+    # 3) Logging global
+    configure_global_logger_from_config(
+        {
+            "log_level": args.log_level,
+            "log_json": args.log_json,
+        }
+    )
+
+    # 4) Ejecutar simulación usando la API existente (sin modificarla)
     results = run_simulation(
         params_config=params_config,
         scenario_config=scenario_config,
         t_end=args.t_end,
         dt=args.dt,
+        integrator=args.integrator,
+        adaptive=args.adaptive,
     )
 
-    # Resumen simple en stdout: estado final
-    time = results["time"]
-    x_hist = results["x"]
-    y_hist = results["y"]
+    # 5) Export (A2.3.4)
+    if args.export != "none":
+        if args.output is None:
+            parser.error("--output es obligatorio si se usa --export")
 
-    if time:
-        t_final = time[-1]
-        id_final = x_hist["id"][-1]
-        iq_final = x_hist["iq"][-1]
-        Vdc_final = x_hist["Vdc"][-1]
-        Idc_final = y_hist["Idc"][-1]
-        P_ac_final = y_hist["P_ac"][-1]
-        Q_ac_final = y_hist["Q_ac"][-1]
+        export_cfg = ExportConfig(overwrite=True)
 
-        print(f"Simulación completada hasta t = {t_final:.6f} s")
-        print("Estado final:")
-        print(f"  id   = {id_final:.6g}")
-        print(f"  iq   = {iq_final:.6g}")
-        print(f"  Vdc  = {Vdc_final:.6g}")
-        print("Variables algebraicas finales:")
-        print(f"  Idc  = {Idc_final:.6g}")
-        print(f"  P_ac = {P_ac_final:.6g}")
-        print(f"  Q_ac = {Q_ac_final:.6g}")
-    else:
-        print("Simulación sin resultados (lista de tiempos vacía).")
+        if args.export == "csv":
+            export_simulation_csv(
+                results["time"],
+                results["x"],
+                results["y"],
+                args.output,
+                config=export_cfg,
+            )
+        elif args.export == "parquet":
+            export_simulation_parquet(
+                results["time"],
+                results["x"],
+                results["y"],
+                args.output,
+                config=export_cfg,
+            )
 
     return 0
 
