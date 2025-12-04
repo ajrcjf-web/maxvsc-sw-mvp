@@ -1,1 +1,7 @@
 -r dashboard/requirements.txt
+fastapi
+uvicorn
+pandas
+pyarrow
+numpy
+httpx
