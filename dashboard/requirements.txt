@@ -1,5 +1,0 @@
-fastapi
-uvicorn
-pydantic
-httpx     # para TestClient que usa httpx backend
-httpx>=0.27
