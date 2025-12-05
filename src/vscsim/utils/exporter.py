@@ -10,7 +10,7 @@ import json
 from .config import ExportConfig
 
 try:  # pragma: no cover - entorno sin pandas
-    import pandas as _pd
+    import pandas as _pd  # type: ignore[import-untyped]
 except ImportError:  # pragma: no cover
     _pd = None
 
@@ -86,7 +86,6 @@ def export_csv(
         fieldnames = keys
     else:
         fieldnames = []
-
 
     with p.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)

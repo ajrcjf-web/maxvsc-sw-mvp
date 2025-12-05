@@ -24,7 +24,7 @@ orquesta la ejecución en el orden aprobado en ENG-1.0.
 from __future__ import annotations
 
 import math
-from typing import Any, Mapping, Tuple, List
+from typing import Any, Mapping, Tuple, List, cast
 
 from vscsim.model.dae import f_rhs, g_residual
 from vscsim.model.jacobian import dg_dy
@@ -163,8 +163,10 @@ def run_step(
             inputs_nr or inputs,
         )
 
-    residual_typed: ResidualFunc = residual_func
-    jacobian_typed: JacobianFunc = jacobian_func
+    # Ajustes de tipado para mypy: el comportamiento en tiempo de ejecución
+    # no cambia, sólo se hace un cast explícito al tipo de protocolo.
+    residual_typed: ResidualFunc = cast(ResidualFunc, residual_func)
+    jacobian_typed: JacobianFunc = cast(JacobianFunc, jacobian_func)
 
     y_next, nr_iter = newton_raphson(
         x=dict(x),
