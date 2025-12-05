@@ -15,6 +15,13 @@ Esta API no modifica el modelo ni el solver: sólo encadena:
 - solver.simulation.run_step
 
 Implementación conforme a la ETU v1.3 (ENG-1.0).
+
+Nota Track A (no-ingeniería)
+----------------------------
+Se aceptan los parámetros numéricos `integrator` y `adaptive` para compatibilidad
+con la CLI extendida, pero en ENG-1.0 esta API sigue utilizando el esquema de
+paso fijo basado en run_step. Los parámetros se reservan para extensiones
+numéricas futuras sin alterar el modelo RMS ni el solver Newton-Raphson.
 """
 
 from typing import Mapping, Any
@@ -32,6 +39,8 @@ def run_simulation(
     scenario_config: Mapping[str, Any],
     t_end: float,
     dt: float,
+    integrator: str | None = None,
+    adaptive: bool = False,
 ) -> dict:
     """
     Ejecuta una simulación RMS VSC-HVDC hasta t_end con paso dt.
@@ -54,6 +63,11 @@ def run_simulation(
       que será menor o igual que t_end. Esto no altera la ingeniería
       del modelo; es una decisión de implementación para ENG-1.0.
 
+    - Los parámetros `integrator` y `adaptive` se incluyen para compatibilidad
+      con la CLI extendida (Track A). En ENG-1.0 esta API utiliza siempre el
+      esquema de paso fijo basado en run_step; la elección de integrador y
+      dt adaptativo se gestionan internamente en el solver numérico.
+
     Parámetros
     ----------
     params_config :
@@ -68,6 +82,16 @@ def run_simulation(
 
     dt :
         Paso de integración.
+
+    integrator :
+        Nombre del integrador solicitado por la CLI (por ejemplo "euler",
+        "rk2", "rk4"). En ENG-1.0 se acepta por compatibilidad pero no
+        altera la secuencia 5.2 ni la formulación del modelo RMS.
+
+    adaptive :
+        Flag de dt adaptativo solicitado por la CLI. En ENG-1.0 se acepta
+        por compatibilidad, pero esta API utiliza un lazo de paso fijo
+        basado en run_step.
 
     Retorno
     -------
