@@ -202,6 +202,7 @@ def run_step(
             dt=dt,
         )
     else:
+
         def rhs(state: Mapping[str, float], context: Mapping[str, Any]) -> dict[str, float]:
             return f_rhs(
                 x=dict(state),
@@ -343,7 +344,12 @@ def run_simulation_adaptive(
         # Criterio de aceptación:
         #  - error_estimate <= tol → aceptamos
         #  - o bien, estamos ya en dt_min → aceptación forzada
-        accept = (error_estimate <= tol) or math.isclose(new_dt, dt_min, rel_tol=0.0, abs_tol=1e-15)
+        accept = (error_estimate <= tol) or math.isclose(
+            new_dt,
+            dt_min,
+            rel_tol=0.0,
+            abs_tol=1e-15,
+        )
 
         # Logging del resultado del paso adaptativo
         global_log(
@@ -371,6 +377,8 @@ def run_simulation_adaptive(
             continue
 
     if steps >= max_steps:
-        raise RuntimeError("run_simulation_adaptive: max_steps alcanzado sin llegar a t_end")
+        raise RuntimeError(
+            "run_simulation_adaptive: max_steps alcanzado sin llegar a t_end",
+        )
 
     return times, x_history, y_history, dt_history
